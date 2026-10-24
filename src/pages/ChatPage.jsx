@@ -3,31 +3,55 @@ import Header from "../components/Header.jsx";
 import ChatWindow from "../components/ChatWindow.jsx";
 import MessageInput from "../components/MessageInput.jsx";
 import ChatPanel from "../components/ChatPanel.jsx";
+import { getCompanion } from "../components/CompanionAvatar.jsx";
 import { checkHealth, getApiUrl, resetChat, sendMessage } from "../services/api.js";
-import { createConversationId, getActiveConversationId, loadHistory, saveHistory, setActiveConversationId, upsertConversation } from "../services/history.js";
+import {
+  createConversationId,
+  getActiveConversationId,
+  fetchUserConversations,
+  saveConversationToDb,
+  deleteConversationFromDb,
+  setActiveConversationId,
+  upsertConversation
+} from "../services/history.js";
+import { supabase } from "../config/supabase.js";
 
 const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-function loadActiveMessages() {
-  const id = getActiveConversationId();
-  return loadHistory().find((conversation) => conversation.id === id)?.messages || [];
-}
-
 export default function ChatPage() {
-  const [conversations, setConversations] = useState(loadHistory);
+  const [conversations, setConversations] = useState([]);
   const [conversationId, setConversationId] = useState(() => {
-    const id = getActiveConversationId();
-    return loadHistory().some((conversation) => conversation.id === id) ? id : createConversationId();
+    return getActiveConversationId() || createConversationId();
   });
-  const [messages, setMessages] = useState(loadActiveMessages);
+  const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("checking");
   const [panel, setPanel] = useState("");
-  const [profileName, setProfileName] = useState(() => {
-    try { return localStorage.getItem("therapeutic_profile_name") || "Profile"; } catch { return "Profile"; }
-  });
+  const [profileName, setProfileName] = useState("Profile");
   const apiUrl = getApiUrl();
+  const companion = getCompanion();
 
+  // Load user profile & conversations from Supabase
+  useEffect(() => {
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        const name = user.user_metadata?.display_name || user.email?.split("@")[0] || "Profile";
+        setProfileName(name);
+      }
+    });
+
+    fetchUserConversations().then((loaded) => {
+      setConversations(loaded);
+      const activeId = getActiveConversationId();
+      const current = loaded.find((c) => c.id === activeId);
+      if (current) {
+        setConversationId(current.id);
+        setMessages(current.messages || []);
+      }
+    });
+  }, []);
+
+  // Health check
   useEffect(() => {
     let cancelled = false;
     setStatus("checking");
@@ -35,24 +59,31 @@ export default function ChatPage() {
     return () => { cancelled = true; };
   }, [apiUrl]);
 
+  // Persist conversation updates to state and Supabase database
   useEffect(() => {
     setActiveConversationId(conversationId);
     if (!messages.length) return;
+
     setConversations((current) => {
       const updated = upsertConversation(current, conversationId, messages);
-      saveHistory(updated);
       return updated;
     });
+
+    // Save to user's database in Supabase
+    saveConversationToDb(conversationId, messages, null, companion.name);
   }, [conversationId, messages]);
 
   async function handleSend(text) {
     if (loading) return;
-    setMessages((current) => [...current, { id: `${Date.now()}-${Math.random()}`, role: "user", content: text, time: now() }]);
+    const userMsg = { id: `${Date.now()}-${Math.random()}`, role: "user", content: text, time: now() };
+    setMessages((current) => [...current, userMsg]);
     setLoading(true);
+
     try {
       const data = await sendMessage(text);
       setStatus("online");
-      setMessages((current) => [...current, { id: `${Date.now()}-${Math.random()}`, role: "bot", content: data.reply, crisis: !!data.is_crisis, time: now() }]);
+      const botMsg = { id: `${Date.now()}-${Math.random()}`, role: "bot", content: data.reply, crisis: !!data.is_crisis, time: now() };
+      setMessages((current) => [...current, botMsg]);
     } catch {
       setStatus("offline");
       setMessages((current) => [...current, { id: `${Date.now()}-${Math.random()}`, role: "bot", error: true, content: "I couldn't reach the chat service just now. Please try again in a little while.", time: now() }]);
@@ -78,8 +109,7 @@ export default function ChatPage() {
       setLoading(true);
       await resetChat();
       try {
-        // Restore this thread's backend context by replaying its earlier user turns.
-        for (const message of conversation.messages) {
+        for (const message of conversation.messages || []) {
           if (message.role === "user") await sendMessage(message.content);
         }
         setStatus("online");
@@ -91,7 +121,15 @@ export default function ChatPage() {
     }
     setConversationId(conversation.id);
     setActiveConversationId(conversation.id);
-    setMessages(conversation.messages);
+    setMessages(conversation.messages || []);
+  }
+
+  async function handleDeleteConversation(id) {
+    await deleteConversationFromDb(id);
+    setConversations((current) => current.filter((c) => c.id !== id));
+    if (conversationId === id) {
+      handleNewChat();
+    }
   }
 
   return (
@@ -105,6 +143,7 @@ export default function ChatPage() {
         conversations={conversations}
         activeId={conversationId}
         onOpenConversation={openConversation}
+        onDeleteConversation={handleDeleteConversation}
         onProfileSave={(profile) => setProfileName(profile.name.trim() || "Profile")}
       />
     </div>

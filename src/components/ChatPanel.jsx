@@ -1,34 +1,36 @@
 import { useEffect, useState } from "react";
 import { getCompanion } from "./CompanionAvatar.jsx";
+import { supabase } from "../config/supabase.js";
+import { LOGIN_ROUTE } from "../config/site.js";
 
 const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || "";
-
-function readProfile() {
-  try {
-    return {
-      name: localStorage.getItem("therapeutic_profile_name") || "",
-      email: localStorage.getItem("therapeutic_profile_email") || ""
-    };
-  } catch {
-    return { name: "", email: "" };
-  }
-}
 
 function formatDate(value) {
   const date = new Date(value);
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export default function ChatPanel({ panel, onClose, conversations = [], activeId, onOpenConversation, onProfileSave }) {
-  const [profile, setProfile] = useState(readProfile);
+export default function ChatPanel({
+  panel,
+  onClose,
+  conversations = [],
+  activeId,
+  onOpenConversation,
+  onDeleteConversation,
+  onProfileSave,
+}) {
+  const [profile, setProfile] = useState({ name: "", email: "" });
+  const [currentUser, setCurrentUser] = useState(null);
   const [saved, setSaved] = useState(false);
   const companion = getCompanion();
 
   useEffect(() => {
-    if (panel === "profile") {
-      setProfile(readProfile());
-      setSaved(false);
-    }
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      setCurrentUser(user);
+      const email = user?.email || localStorage.getItem("therapeutic_profile_email") || "";
+      const name = localStorage.getItem("therapeutic_profile_name") || email.split("@")[0] || "";
+      setProfile({ name, email });
+    });
   }, [panel]);
 
   useEffect(() => {
@@ -40,16 +42,36 @@ export default function ChatPanel({ panel, onClose, conversations = [], activeId
 
   if (!panel) return null;
 
-  function saveProfile(event) {
+  async function saveProfile(event) {
     event.preventDefault();
     try {
       localStorage.setItem("therapeutic_profile_name", profile.name.trim());
       localStorage.setItem("therapeutic_profile_email", profile.email.trim());
+
+      if (currentUser) {
+        await supabase.from("profiles").upsert({
+          id: currentUser.id,
+          email: profile.email.trim(),
+          display_name: profile.name.trim(),
+          updated_at: new Date().toISOString()
+        });
+      }
     } catch {
-      // Keep the values in this view if browser storage is unavailable.
+      // fallback
     }
     onProfileSave?.(profile);
     setSaved(true);
+  }
+
+  async function handleSignOut() {
+    try {
+      await supabase.auth.signOut();
+      localStorage.removeItem("therapeutic_profile_email");
+      localStorage.removeItem("therapeutic_profile_name");
+    } catch {
+      // fallback
+    }
+    window.location.hash = LOGIN_ROUTE;
   }
 
   return (
@@ -65,37 +87,115 @@ export default function ChatPanel({ panel, onClose, conversations = [], activeId
 
         {panel === "history" && (
           <div className="panel-body">
-            <p className="panel-intro">Your conversations are saved on this device, so you can come back to them anytime.</p>
+            <p className="panel-intro">
+              {currentUser
+                ? `Conversations are saved to your account database (${currentUser.email}).`
+                : "Your conversations are saved on this device."}
+            </p>
             {conversations.length === 0 ? (
               <div className="panel-empty"><span aria-hidden="true">◷</span><strong>No conversations yet</strong><p>Your chats will appear here as you talk.</p></div>
             ) : (
               <div className="history-list">
                 {conversations.map((conversation) => (
-                  <button key={conversation.id} className={`history-item ${conversation.id === activeId ? "is-active" : ""}`} onClick={() => onOpenConversation(conversation)}>
-                    <span className="history-icon" aria-hidden="true">◷</span>
-                    <span className="history-item-copy"><strong>{conversation.title || "A conversation"}</strong><small>{conversation.messages.filter((message) => message.role === "user").length} messages</small></span>
-                    <time>{formatDate(conversation.updatedAt)}</time>
-                  </button>
+                  <div key={conversation.id} style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <button
+                      className={`history-item ${conversation.id === activeId ? "is-active" : ""}`}
+                      onClick={() => onOpenConversation(conversation)}
+                      style={{ flex: 1 }}
+                    >
+                      <span className="history-icon" aria-hidden="true">◷</span>
+                      <span className="history-item-copy">
+                        <strong>{conversation.title || "A conversation"}</strong>
+                        <small>{(conversation.messages || []).filter((m) => m.role === "user").length} messages</small>
+                      </span>
+                      <time>{formatDate(conversation.updatedAt)}</time>
+                    </button>
+                    {onDeleteConversation && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (window.confirm("Delete this conversation from your history?")) {
+                            onDeleteConversation(conversation.id);
+                          }
+                        }}
+                        title="Delete conversation"
+                        style={{
+                          background: "none",
+                          border: "1px solid var(--line, #e2d9cd)",
+                          borderRadius: "10px",
+                          width: "36px",
+                          height: "36px",
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          color: "#991b1b",
+                          fontSize: "14px"
+                        }}
+                        aria-label="Delete conversation"
+                      >
+                        🗑
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
             )}
-            <p className="panel-footnote">Chat history is stored in this browser and is not synced between devices.</p>
+            <p className="panel-footnote">
+              {currentUser
+                ? "All messages are securely synced to your Supabase cloud database under your user account."
+                : "Sign in to synchronize your chat history across devices."}
+            </p>
           </div>
         )}
 
         {panel === "profile" && (
           <form className="panel-body profile-form" onSubmit={saveProfile}>
-            <p className="panel-intro">Add your details so your space feels a little more personal.</p>
+            <p className="panel-intro">Add your details so your space feels personal.</p>
             <div className="profile-companion">
               <span className="profile-companion-image">
                 {companion.avatar ? <img src={companion.avatar} alt={`${companion.name}, your companion`} /> : <span aria-hidden="true">{companion.name.slice(0, 1).toUpperCase()}</span>}
               </span>
               <span className="profile-companion-name">{companion.name}</span>
             </div>
-            <label>Your name<input autoComplete="name" value={profile.name} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} placeholder="Your name" /></label>
-            <label>Email address<input type="email" autoComplete="email" value={profile.email} onChange={(event) => setProfile((current) => ({ ...current, email: event.target.value }))} placeholder="you@example.com" /></label>
-            <p className="panel-footnote">Profile details are saved on this device. They are not used to sign in.</p>
-            <button className="panel-primary" type="submit">Save profile</button>
+            <label>
+              Your name
+              <input
+                autoComplete="name"
+                value={profile.name}
+                onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))}
+                placeholder="Your name"
+              />
+            </label>
+            <label>
+              Email address
+              <input
+                type="email"
+                autoComplete="email"
+                disabled={!!currentUser}
+                value={profile.email}
+                onChange={(event) => setProfile((current) => ({ ...current, email: event.target.value }))}
+                placeholder="you@example.com"
+              />
+            </label>
+            {currentUser && (
+              <p className="panel-footnote" style={{ marginTop: 0, color: "#166534" }}>
+                ✓ Signed in with Supabase ({currentUser.email})
+              </p>
+            )}
+            <div style={{ display: "flex", gap: "10px", marginTop: "8px" }}>
+              <button className="panel-primary" type="submit" style={{ flex: 1 }}>Save profile</button>
+              {currentUser && (
+                <button
+                  className="panel-primary"
+                  type="button"
+                  onClick={handleSignOut}
+                  style={{ background: "#7f1d1d", flex: 1 }}
+                >
+                  Log out
+                </button>
+              )}
+            </div>
             {saved && <p className="saved-note" role="status">Your profile is saved.</p>}
           </form>
         )}
