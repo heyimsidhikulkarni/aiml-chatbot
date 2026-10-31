@@ -9,5 +9,14 @@ export default defineConfig({
       usePolling: true,
       interval: 1000
     }
-  }
+  },
+  test: {
+    environment: "jsdom",
+    globals: true,
+    setupFiles: [],
+    coverage: {
+      provider: "v8",
+      reporter: ["text", "html"],
+    },
+  },
 });
