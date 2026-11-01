@@ -6,15 +6,15 @@ import HowItWorksSection from "../components/landing/HowItWorksSection.jsx";
 import FinalCTA from "../components/landing/FinalCTA.jsx";
 import Footer from "../components/landing/Footer.jsx";
 
-export default function LandingPage() {
+export default function LandingPage({ isLoggedIn = false }) {
   return (
     <div className="lp">
-      <Navbar />
+      <Navbar isLoggedIn={isLoggedIn} />
       <main>
-        <HeroSection />
+        <HeroSection isLoggedIn={isLoggedIn} />
         <FeaturesSection />
         <HowItWorksSection />
-        <FinalCTA />
+        <FinalCTA isLoggedIn={isLoggedIn} />
       </main>
       <Footer />
     </div>

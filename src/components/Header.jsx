@@ -5,7 +5,10 @@ export default function Header({ status, onNewChat, onOpenPanel, profileName = "
 
   return (
     <header className="header">
-      <a className="chat-wordmark" href="#/" aria-label="Mello home"><img src="/brand/mello-logo.png" alt="Mello" /></a>
+      <div className="header-brand">
+        <a className="chat-wordmark" href="#/" aria-label="Mello home"><img src="/brand/mello-logo.png" alt="Mello" /></a>
+        <a className="btn home-btn" href="#/">Back to home</a>
+      </div>
       <div className="header-companion">
         <CompanionAvatar name={companion.name} avatar={companion.avatar} />
         <span className="companion-copy">

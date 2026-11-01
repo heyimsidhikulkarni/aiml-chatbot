@@ -4,22 +4,17 @@ import ChatWindow from "../components/ChatWindow.jsx";
 import MessageInput from "../components/MessageInput.jsx";
 import ChatPanel from "../components/ChatPanel.jsx";
 import { checkHealth, getApiUrl, resetChat, sendMessage } from "../services/api.js";
-import { createConversationId, getActiveConversationId, loadHistory, saveHistory, setActiveConversationId, upsertConversation } from "../services/history.js";
+import { createConversationId, loadHistory, loadLocalHistory, saveHistory, saveLocalHistory, setActiveConversationId, upsertConversation } from "../services/history.js";
+import { supabase } from "../services/supabase.js";
 
 const now = () => new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
-function loadActiveMessages() {
-  const id = getActiveConversationId();
-  return loadHistory().find((conversation) => conversation.id === id)?.messages || [];
-}
-
 export default function ChatPage() {
-  const [conversations, setConversations] = useState(loadHistory);
-  const [conversationId, setConversationId] = useState(() => {
-    const id = getActiveConversationId();
-    return loadHistory().some((conversation) => conversation.id === id) ? id : createConversationId();
-  });
-  const [messages, setMessages] = useState(loadActiveMessages);
+  const [conversations, setConversations] = useState([]);
+  const [conversationId, setConversationId] = useState(createConversationId);
+  const [messages, setMessages] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(true);
+  const [historyLoaded, setHistoryLoaded] = useState(false);
   const [loading, setLoading] = useState(false);
   const [status, setStatus] = useState("checking");
   const [panel, setPanel] = useState("");
@@ -30,20 +25,37 @@ export default function ChatPage() {
 
   useEffect(() => {
     let cancelled = false;
+    loadHistory()
+      .catch(() => loadLocalHistory())
+      .then((storedConversations) => {
+        if (cancelled) return;
+        const newConversationId = createConversationId();
+        setConversations(storedConversations);
+        setConversationId(newConversationId);
+        setActiveConversationId(newConversationId);
+        setMessages([]);
+        setHistoryLoaded(true);
+      });
+    return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
     setStatus("checking");
     checkHealth().then((ok) => { if (!cancelled) setStatus(ok ? "online" : "offline"); });
     return () => { cancelled = true; };
   }, [apiUrl]);
 
   useEffect(() => {
+    if (!historyLoaded) return;
     setActiveConversationId(conversationId);
     if (!messages.length) return;
     setConversations((current) => {
       const updated = upsertConversation(current, conversationId, messages);
-      saveHistory(updated);
+      saveHistory(updated).catch(() => undefined);
       return updated;
     });
-  }, [conversationId, messages]);
+  }, [conversationId, messages, historyLoaded]);
 
   async function handleSend(text) {
     if (loading) return;
@@ -68,7 +80,31 @@ export default function ChatPage() {
     setConversationId(id);
     setActiveConversationId(id);
     setMessages([]);
+    setShowSuggestions(false);
     setPanel("");
+  }
+
+  async function handleDeleteConversation(conversation) {
+    const remaining = conversations.filter((item) => item.id !== conversation.id);
+    setConversations(remaining);
+    saveLocalHistory(remaining);
+    if (conversation.id === conversationId) {
+      setMessages([]);
+      setConversationId(createConversationId());
+      setShowSuggestions(false);
+    }
+    try {
+      const { error } = await supabase.from("conversations").delete().eq("id", conversation.id);
+      if (error) throw error;
+    } catch {
+      // The local history is removed even if cloud history cannot be reached.
+    }
+  }
+
+  async function handleLogout() {
+    await supabase.auth.signOut();
+    setPanel("");
+    window.location.hash = "#/";
   }
 
   async function openConversation(conversation) {
@@ -97,7 +133,7 @@ export default function ChatPage() {
   return (
     <div className="app">
       <Header status={status} onNewChat={handleNewChat} onOpenPanel={setPanel} profileName={profileName} />
-      <ChatWindow messages={messages} loading={loading} onSuggestion={handleSend} />
+      <ChatWindow messages={messages} loading={loading} onSuggestion={handleSend} showSuggestions={showSuggestions} />
       <MessageInput onSend={handleSend} disabled={loading} />
       <ChatPanel
         panel={panel}
@@ -105,7 +141,9 @@ export default function ChatPage() {
         conversations={conversations}
         activeId={conversationId}
         onOpenConversation={openConversation}
+        onDeleteConversation={handleDeleteConversation}
         onProfileSave={(profile) => setProfileName(profile.name.trim() || "Profile")}
+        onLogout={handleLogout}
       />
     </div>
   );

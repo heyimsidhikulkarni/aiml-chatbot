@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getCompanion } from "./CompanionAvatar.jsx";
+import { supabase } from "../services/supabase.js";
 
 const SUPPORT_EMAIL = import.meta.env.VITE_SUPPORT_EMAIL || "";
 
@@ -7,10 +8,11 @@ function readProfile() {
   try {
     return {
       name: localStorage.getItem("therapeutic_profile_name") || "",
-      email: localStorage.getItem("therapeutic_profile_email") || ""
+      email: localStorage.getItem("therapeutic_profile_email") || "",
+      age: localStorage.getItem("therapeutic_profile_age") || ""
     };
   } catch {
-    return { name: "", email: "" };
+    return { name: "", email: "", age: "" };
   }
 }
 
@@ -19,7 +21,7 @@ function formatDate(value) {
   return Number.isNaN(date.getTime()) ? "" : date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-export default function ChatPanel({ panel, onClose, conversations = [], activeId, onOpenConversation, onProfileSave }) {
+export default function ChatPanel({ panel, onClose, conversations = [], activeId, onOpenConversation, onDeleteConversation, onProfileSave, onLogout }) {
   const [profile, setProfile] = useState(readProfile);
   const [saved, setSaved] = useState(false);
   const companion = getCompanion();
@@ -45,6 +47,7 @@ export default function ChatPanel({ panel, onClose, conversations = [], activeId
     try {
       localStorage.setItem("therapeutic_profile_name", profile.name.trim());
       localStorage.setItem("therapeutic_profile_email", profile.email.trim());
+      localStorage.setItem("therapeutic_profile_age", profile.age.trim());
     } catch {
       // Keep the values in this view if browser storage is unavailable.
     }
@@ -65,21 +68,24 @@ export default function ChatPanel({ panel, onClose, conversations = [], activeId
 
         {panel === "history" && (
           <div className="panel-body">
-            <p className="panel-intro">Your conversations are saved on this device, so you can come back to them anytime.</p>
+            <p className="panel-intro">Your conversations are saved on this device and, when you’re signed in, to your account.</p>
             {conversations.length === 0 ? (
               <div className="panel-empty"><span aria-hidden="true">◷</span><strong>No conversations yet</strong><p>Your chats will appear here as you talk.</p></div>
             ) : (
               <div className="history-list">
                 {conversations.map((conversation) => (
-                  <button key={conversation.id} className={`history-item ${conversation.id === activeId ? "is-active" : ""}`} onClick={() => onOpenConversation(conversation)}>
-                    <span className="history-icon" aria-hidden="true">◷</span>
-                    <span className="history-item-copy"><strong>{conversation.title || "A conversation"}</strong><small>{conversation.messages.filter((message) => message.role === "user").length} messages</small></span>
-                    <time>{formatDate(conversation.updatedAt)}</time>
-                  </button>
+                  <div key={conversation.id} className={`history-item${conversation.id === activeId ? " is-active" : ""}`}>
+                    <button className="history-item-open" type="button" onClick={() => onOpenConversation(conversation)}>
+                      <span className="history-icon" aria-hidden="true">◷</span>
+                      <span className="history-item-copy"><strong>{conversation.title || "A conversation"}</strong><small>{conversation.messages.filter((message) => message.role === "user").length} messages</small></span>
+                      <time>{formatDate(conversation.updatedAt)}</time>
+                    </button>
+                    <button className="history-delete" type="button" aria-label={`Delete ${conversation.title || "conversation"}`} title="Delete conversation" onClick={() => onDeleteConversation?.(conversation)}><span aria-hidden="true">×</span></button>
+                  </div>
                 ))}
               </div>
             )}
-            <p className="panel-footnote">Chat history is stored in this browser and is not synced between devices.</p>
+            <p className="panel-footnote">Signed-in conversations can be accessed again when you sign in on another device.</p>
           </div>
         )}
 
@@ -93,10 +99,12 @@ export default function ChatPanel({ panel, onClose, conversations = [], activeId
               <span className="profile-companion-name">{companion.name}</span>
             </div>
             <label>Your name<input autoComplete="name" value={profile.name} onChange={(event) => setProfile((current) => ({ ...current, name: event.target.value }))} placeholder="Your name" /></label>
+            <label>Age<input inputMode="numeric" value={profile.age} onChange={(event) => setProfile((current) => ({ ...current, age: event.target.value }))} placeholder="Your age (optional)" /></label>
             <label>Email address<input type="email" autoComplete="email" value={profile.email} onChange={(event) => setProfile((current) => ({ ...current, email: event.target.value }))} placeholder="you@example.com" /></label>
             <p className="panel-footnote">Profile details are saved on this device. They are not used to sign in.</p>
             <button className="panel-primary" type="submit">Save profile</button>
             {saved && <p className="saved-note" role="status">Your profile is saved.</p>}
+            <button className="panel-primary logout-button" type="button" onClick={onLogout}>Log out</button>
           </form>
         )}
 

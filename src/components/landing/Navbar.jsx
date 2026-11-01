@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { AUTH_ROUTE, CONTACT_HREF, LOGIN_ROUTE } from "../../config/site.js";
+import { AUTH_ROUTE, CHAT_ROUTE, CONTACT_HREF, LOGIN_ROUTE } from "../../config/site.js";
 import { scrollToSection } from "./scrollToSection.js";
 
 const LINKS = [
@@ -9,7 +9,7 @@ const LINKS = [
   { label: "Contact", id: "contact", href: CONTACT_HREF }
 ];
 
-export default function Navbar() {
+export default function Navbar({ isLoggedIn = false }) {
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -48,15 +48,15 @@ export default function Navbar() {
               {link.label}
             </a>
           ))}
-          <a className="lp-btn lp-btn--primary lp-btn--sm lp-nav__cta-mobile" href={AUTH_ROUTE}>
-            Get Started
+          <a className="lp-btn lp-btn--primary lp-btn--sm lp-nav__cta-mobile" href={isLoggedIn ? CHAT_ROUTE : AUTH_ROUTE}>
+            {isLoggedIn ? "Continue" : "Get Started"}
           </a>
-          <a className="lp-btn lp-btn--outline lp-btn--sm lp-nav__login-mobile" href={LOGIN_ROUTE}>Log in</a>
+          {!isLoggedIn && <a className="lp-btn lp-btn--outline lp-btn--sm lp-nav__login-mobile" href={LOGIN_ROUTE}>Log in</a>}
         </nav>
 
         <div className="lp-nav__actions">
-          <a className="lp-btn lp-btn--outline lp-btn--sm lp-nav__login" href={LOGIN_ROUTE}>Log in</a>
-          <a className="lp-btn lp-btn--primary lp-btn--sm lp-nav__cta" href={AUTH_ROUTE}>Get Started</a>
+          {!isLoggedIn && <a className="lp-btn lp-btn--outline lp-btn--sm lp-nav__login" href={LOGIN_ROUTE}>Log in</a>}
+          <a className="lp-btn lp-btn--primary lp-btn--sm lp-nav__cta" href={isLoggedIn ? CHAT_ROUTE : AUTH_ROUTE}>{isLoggedIn ? "Continue" : "Get Started"}</a>
         </div>
 
         <button

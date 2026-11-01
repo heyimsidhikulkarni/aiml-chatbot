@@ -9,7 +9,7 @@ const SUGGESTIONS = [
   { title: "I just want to talk", message: "I don't really know where to start." }
 ];
 
-export default function ChatWindow({ messages, loading, onSuggestion }) {
+export default function ChatWindow({ messages, loading, onSuggestion, showSuggestions = true }) {
   const endRef = useRef(null);
   const companion = getCompanion();
 
@@ -20,7 +20,7 @@ export default function ChatWindow({ messages, loading, onSuggestion }) {
 
   return (
     <main className="messages" aria-live="polite">
-      {messages.length === 0 && (
+      {messages.length === 0 && showSuggestions && (
         <section className="welcome" aria-labelledby="welcome-title">
           <CompanionAvatar name={companion.name} avatar={companion.avatar} className="avatar welcome-avatar" />
           <p className="welcome-eyebrow">A little space, just for you</p>

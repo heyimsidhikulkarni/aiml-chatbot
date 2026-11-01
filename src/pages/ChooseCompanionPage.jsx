@@ -17,6 +17,7 @@ import companion13 from "../assets/companions/companion-13.png";
 import companion14 from "../assets/companions/companion-14.png";
 import companion15 from "../assets/companions/companion-15.png";
 import companion16 from "../assets/companions/companion-16.png";
+import { supabase } from "../services/supabase.js";
 
 const COMPANION_IMAGES = [
   companion01, companion02, companion03, companion04, companion05, companion06, companion07, companion08,
@@ -32,14 +33,29 @@ export default function ChooseCompanionPage() {
   const [selected, setSelected] = useState("");
   const [name, setName] = useState("");
 
-  function startChat() {
+  async function startChat() {
     if (!selected) return;
     const companion = COMPANIONS.find((item) => item.id === selected);
+    const companionName = name.trim() || "mello";
     try {
-      localStorage.setItem("companionName", name.trim() || "mello");
+      localStorage.setItem("companionName", companionName);
       localStorage.setItem("companionAvatar", companion.image);
+      localStorage.setItem("companionId", selected);
     } catch { /* The chat can still start if local storage is unavailable. */ }
+
     window.location.hash = CHAT_ROUTE;
+
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user) {
+        supabase.from("profiles").upsert({
+          id: user.id,
+          email: user.email,
+          companion_id: selected,
+          companion_name: companionName,
+          updated_at: new Date().toISOString()
+        });
+      }
+    });
   }
 
   function skipNaming() {

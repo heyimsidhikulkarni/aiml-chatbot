@@ -2,7 +2,7 @@ import { AUTH_ROUTE, CHAT_ROUTE } from "../../config/site.js";
 import HeroCharacterVideo from "./HeroCharacterVideo.jsx";
 import FloatingCharacters from "./FloatingCharacters.jsx";
 
-export default function HeroSection() {
+export default function HeroSection({ isLoggedIn = false }) {
   return (
     <section className="lp-hero" aria-labelledby="hero-title">
       <FloatingCharacters />
@@ -14,10 +14,10 @@ export default function HeroSection() {
         small step. Meet your companion and start a conversation at your own pace.
       </p>
       <div className="lp-hero__actions">
-        <a className="lp-btn lp-btn--primary" href={AUTH_ROUTE}>
+        <a className="lp-btn lp-btn--primary" href={isLoggedIn ? CHAT_ROUTE : AUTH_ROUTE}>
           Meet Your Companion
         </a>
-        <a className="lp-btn lp-btn--outline" href={CHAT_ROUTE}>Try Mello</a>
+        {!isLoggedIn && <a className="lp-btn lp-btn--outline" href={CHAT_ROUTE}>Try Mello</a>}
       </div>
       <HeroCharacterVideo />
     </section>
