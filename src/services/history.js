@@ -5,16 +5,34 @@ const ACTIVE_KEY = "therapeutic_active_conversation_v1";
 
 // ─── Conversation ID helpers ────────────────────────────────────────────────
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// CHANGED: always returns a real UUID v4. The old fallback ("chat-<time>-<rand>")
+// was used whenever crypto.randomUUID is unavailable (it only exists on https or
+// localhost, so e.g. http://192.168.x.x dev servers hit it). That string is not a
+// valid value for conversations.id (uuid) so saves failed, and the backend rejects it.
 export function createConversationId() {
-  return (
-    globalThis.crypto?.randomUUID?.() ||
-    `chat-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
-  );
+  if (globalThis.crypto?.randomUUID) return globalThis.crypto.randomUUID();
+  const bytes = new Uint8Array(16);
+  if (globalThis.crypto?.getRandomValues) {
+    globalThis.crypto.getRandomValues(bytes);
+  } else {
+    for (let i = 0; i < 16; i++) bytes[i] = Math.floor(Math.random() * 256);
+  }
+  bytes[6] = (bytes[6] & 0x0f) | 0x40; // version 4
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // variant 10
+  const hex = Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+// CHANGED: ignore a stored id that is not a UUID (left over from the old fallback
+// format). Returning "" makes the page create a fresh valid id instead of sending
+// an id the backend and database will reject on every message.
 export function getActiveConversationId() {
   try {
-    return localStorage.getItem(ACTIVE_KEY) || "";
+    const stored = localStorage.getItem(ACTIVE_KEY) || "";
+    return UUID_RE.test(stored) ? stored : "";
   } catch {
     return "";
   }

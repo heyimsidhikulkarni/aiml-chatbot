@@ -24,6 +24,19 @@ import { supabase } from "../config/supabase.js";
 const now = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
+// CHANGED: UI-only "couldn't reach the chat service" bubbles are never saved. They
+// are not part of the conversation, and once saved they would come back every time
+// the chat is reopened and be replayed as history.
+const persistable = (msgs) => (msgs || []).filter((m) => !m.error);
+
+// CHANGED: identifies "what is already stored" so data we just LOADED from Supabase
+// is not written straight back (which bumped updated_at and reordered the history
+// list merely because a chat was opened).
+const persistKey = (id, msgs) => {
+  const list = persistable(msgs);
+  return `${id}:${list.length}:${list[list.length - 1]?.id ?? ""}`;
+};
+
 export default function ChatPage() {
   const [conversations, setConversations] = useState([]);
   const [conversationId, setConversationId] = useState(
@@ -37,6 +50,9 @@ export default function ChatPage() {
 
   const apiUrl = getApiUrl();
   const companion = getCompanion();
+
+  // Key of the last state known to be in Supabase (loaded or saved).
+  const persistedKeyRef = useRef(null);
 
   // ── Cached auth session — refreshed on every request, held in a ref
   //    so handlers always have the latest token without re-rendering ──────────
@@ -64,6 +80,7 @@ export default function ChatPage() {
       const activeId = getActiveConversationId();
       const current = loaded.find((c) => c.id === activeId);
       if (current) {
+        persistedKeyRef.current = persistKey(current.id, current.messages); // CHANGED
         setConversationId(current.id);
         setMessages(current.messages || []);
       }
@@ -83,17 +100,21 @@ export default function ChatPage() {
   }, [apiUrl]);
 
   // ── Persist conversation updates to state and Supabase ──────────────────────
-  // Only runs when conversationId or messages actually change.
   // saveConversationToDb is debounced internally — safe to call on every update.
   useEffect(() => {
     setActiveConversationId(conversationId);
-    if (!messages.length) return;
+    const toSave = persistable(messages); // CHANGED: never persist error bubbles
+    if (!toSave.length) return;
+
+    const key = persistKey(conversationId, messages);
+    if (key === persistedKeyRef.current) return; // CHANGED: nothing new to save
+    persistedKeyRef.current = key;
 
     setConversations((current) =>
-      upsertConversation(current, conversationId, messages)
+      upsertConversation(current, conversationId, toSave)
     );
 
-    saveConversationToDb(conversationId, messages, null, companion.name);
+    saveConversationToDb(conversationId, toSave, null, companion.name);
   }, [conversationId, messages, companion.name]);
 
   // ── Send a message ──────────────────────────────────────────────────────────
@@ -110,9 +131,8 @@ export default function ChatPage() {
     setLoading(true);
 
     try {
-      // sendMessage now receives conversationId so Flask can load the correct history.
-      // The auth token is fetched inside sendMessage (via authHeaders()) — the
-      // frontend never supplies the user_id; the backend derives it from the JWT.
+      // The backend authenticates the JWT itself and loads THIS conversation's saved
+      // history from Supabase; the frontend never supplies a user_id.
       const data = await sendMessage(text, conversationId, companion.name);
       setStatus("online");
       const botMsg = {
@@ -142,10 +162,8 @@ export default function ChatPage() {
   }
 
   // ── New chat ─────────────────────────────────────────────────────────────────
-  // FIXED: we do NOT call resetChat() here. The old conversation stays fully
-  // intact in Supabase. We simply generate a new UUID for the next conversation.
-  // The Flask backend will start a clean slate automatically because it has never
-  // seen this new conversationId before.
+  // Does NOT call resetChat(): the old conversation stays intact in Supabase and a
+  // new UUID starts a clean conversation (long-term memory carries over server-side).
   async function handleNewChat() {
     if (loading) return;
     const id = createConversationId();
@@ -156,14 +174,14 @@ export default function ChatPage() {
   }
 
   // ── Open a saved conversation ─────────────────────────────────────────────────
-  // FIXED: we no longer replay messages through the LLM.
-  // The saved messages are displayed immediately from Supabase.
-  // The Flask backend loads the conversation history from Supabase on the next /chat call.
+  // Saved messages are shown from state; the backend reloads the same history from
+  // Supabase on the next /chat call, so the conversation continues with full context.
   async function openConversation(conversation) {
     setPanel("");
     if (loading) return;
     if (conversation.id === conversationId) return; // already open
 
+    persistedKeyRef.current = persistKey(conversation.id, conversation.messages); // CHANGED
     setConversationId(conversation.id);
     setActiveConversationId(conversation.id);
     setMessages(conversation.messages || []);
